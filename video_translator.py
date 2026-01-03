@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Video Translator Desktop App
-Translates video audio from English to Bengali
+Translates video audio and subtitles from English to Bengali
 """
 
 import tkinter as tk
@@ -11,12 +11,15 @@ import os
 import sys
 from pathlib import Path
 import speech_recognition as sr
-from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
+from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, TextClip, CompositeVideoClip
 from googletrans import Translator
 from gtts import gTTS
 import tempfile
 import wave
 import contextlib
+import subprocess
+import re
+from datetime import timedelta
 
 
 class VideoTranslatorApp:
@@ -80,31 +83,21 @@ class VideoTranslatorApp:
         ).grid(row=1, column=0, padx=5, pady=5, sticky="w")
         
         # Options section
-        options_frame = ttk.LabelFrame(self.root, text="Options", padding=10)
+        options_frame = ttk.LabelFrame(self.root, text="Translation Progress", padding=10)
         options_frame.grid(row=3, column=0, padx=10, pady=5, sticky="nsew")
         options_frame.grid_columnconfigure(0, weight=1)
         options_frame.grid_rowconfigure(1, weight=1)
         
-        # Audio mode selection
-        mode_frame = ttk.Frame(options_frame)
-        mode_frame.grid(row=0, column=0, sticky="ew", pady=5)
+        # Info label
+        info_frame = ttk.Frame(options_frame)
+        info_frame.grid(row=0, column=0, sticky="ew", pady=5)
         
-        ttk.Label(mode_frame, text="Audio Mode:").pack(side=tk.LEFT, padx=5)
-        
-        self.audio_mode = tk.StringVar(value="replace")
-        ttk.Radiobutton(
-            mode_frame,
-            text="Replace Original Audio",
-            variable=self.audio_mode,
-            value="replace"
-        ).pack(side=tk.LEFT, padx=5)
-        
-        ttk.Radiobutton(
-            mode_frame,
-            text="Mix with Original",
-            variable=self.audio_mode,
-            value="mix"
-        ).pack(side=tk.LEFT, padx=5)
+        info_label = ttk.Label(
+            info_frame, 
+            text="✓ Audio will be replaced with Bengali dubbing  ✓ Subtitles will be translated to Bengali",
+            foreground="green"
+        )
+        info_label.pack(side=tk.LEFT, padx=5)
         
         # Progress/Log section
         ttk.Label(options_frame, text="Progress Log:").grid(row=1, column=0, sticky="w", pady=5)
@@ -216,15 +209,140 @@ class VideoTranslatorApp:
         thread = threading.Thread(target=self.translate_video, daemon=True)
         thread.start()
     
+    def extract_subtitles(self, video_path, output_srt_path):
+        """Extract subtitles from video using ffmpeg"""
+        try:
+            self.log_message("Attempting to extract embedded subtitles...")
+            result = subprocess.run(
+                ['ffmpeg', '-i', video_path, '-map', '0:s:0', output_srt_path, '-y'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if os.path.exists(output_srt_path) and os.path.getsize(output_srt_path) > 0:
+                self.log_message(f"✓ Subtitles extracted successfully")
+                return True
+            else:
+                self.log_message("No embedded subtitles found in video")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            self.log_message("Subtitle extraction timed out")
+            return False
+        except Exception as e:
+            self.log_message(f"Subtitle extraction failed: {str(e)}")
+            return False
+    
+    def parse_srt(self, srt_path):
+        """Parse SRT subtitle file"""
+        try:
+            with open(srt_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            subtitle_pattern = re.compile(
+                r'(\d+)\s*\n'
+                r'(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})\s*\n'
+                r'((?:.*\n)*?)(?:\n|$)',
+                re.MULTILINE
+            )
+            
+            subtitles = []
+            for match in subtitle_pattern.finditer(content):
+                index = int(match.group(1))
+                start_time = match.group(2)
+                end_time = match.group(3)
+                text = match.group(4).strip()
+                
+                subtitles.append({
+                    'index': index,
+                    'start': start_time,
+                    'end': end_time,
+                    'text': text
+                })
+            
+            return subtitles
+        except Exception as e:
+            self.log_message(f"Error parsing SRT: {str(e)}")
+            return []
+    
+    def translate_subtitles(self, subtitles):
+        """Translate subtitle text to Bengali"""
+        translator = Translator()
+        translated_subtitles = []
+        
+        total = len(subtitles)
+        for i, sub in enumerate(subtitles, 1):
+            try:
+                if sub['text']:
+                    translation = translator.translate(sub['text'], src='en', dest='bn')
+                    translated_text = translation.text
+                else:
+                    translated_text = sub['text']
+                
+                translated_subtitles.append({
+                    'index': sub['index'],
+                    'start': sub['start'],
+                    'end': sub['end'],
+                    'text': translated_text
+                })
+                
+                if i % 10 == 0 or i == total:
+                    self.log_message(f"Translated {i}/{total} subtitle entries...")
+                    
+            except Exception as e:
+                self.log_message(f"Warning: Failed to translate subtitle {i}: {str(e)}")
+                translated_subtitles.append(sub)
+        
+        return translated_subtitles
+    
+    def write_srt(self, subtitles, output_path):
+        """Write subtitles to SRT file"""
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                for sub in subtitles:
+                    f.write(f"{sub['index']}\n")
+                    f.write(f"{sub['start']} --> {sub['end']}\n")
+                    f.write(f"{sub['text']}\n\n")
+            return True
+        except Exception as e:
+            self.log_message(f"Error writing SRT: {str(e)}")
+            return False
+    
+    def embed_subtitles(self, video_path, subtitle_path, output_path):
+        """Embed subtitles into video using ffmpeg"""
+        try:
+            self.log_message("Embedding Bengali subtitles into video...")
+            
+            result = subprocess.run([
+                'ffmpeg', '-i', video_path, '-i', subtitle_path,
+                '-c', 'copy', '-c:s', 'mov_text',
+                '-metadata:s:s:0', 'language=ben',
+                output_path, '-y'
+            ], capture_output=True, text=True, timeout=300)
+            
+            if result.returncode == 0:
+                self.log_message("✓ Subtitles embedded successfully")
+                return True
+            else:
+                self.log_message("Note: Could not embed subtitles, but video with audio is ready")
+                return False
+                
+        except Exception as e:
+            self.log_message(f"Subtitle embedding failed: {str(e)}")
+            return False
+    
     def translate_video(self):
         """Main translation process"""
         try:
             self.log_message("=" * 60)
             self.log_message("Starting video translation process...")
+            self.log_message("Audio will be replaced with Bengali dubbing")
+            self.log_message("Subtitles will be translated to Bengali (if present)")
             self.log_message("=" * 60)
             
             # Step 1: Load video
-            self.log_message("Step 1: Loading video file...")
+            self.log_message("\nStep 1: Loading video file...")
             video = VideoFileClip(self.input_video_path)
             self.log_message(f"Video loaded: Duration={video.duration:.2f}s, FPS={video.fps}")
             
@@ -252,51 +370,91 @@ class VideoTranslatorApp:
                 self.log_message(f"Translated text: {bengali_text[:100]}...")
                 
                 # Step 5: Generate Bengali audio
-                self.log_message("\nStep 5: Generating Bengali audio...")
+                self.log_message("\nStep 5: Generating Bengali audio (dubbing)...")
                 bengali_audio_path = os.path.join(temp_dir, "bengali_audio.mp3")
                 self.generate_audio(bengali_text, bengali_audio_path)
                 self.log_message("Bengali audio generated")
                 
-                # Step 6: Combine video with new audio
-                self.log_message("\nStep 6: Combining video with Bengali audio...")
+                # Step 6: Process subtitles
+                self.log_message("\nStep 6: Processing subtitles...")
+                english_srt_path = os.path.join(temp_dir, "english_subs.srt")
+                bengali_srt_path = os.path.join(temp_dir, "bengali_subs.srt")
+                has_subtitles = False
+                
+                if self.extract_subtitles(self.input_video_path, english_srt_path):
+                    self.log_message("Parsing subtitles...")
+                    subtitles = self.parse_srt(english_srt_path)
+                    
+                    if subtitles:
+                        self.log_message(f"Found {len(subtitles)} subtitle entries")
+                        self.log_message("Translating subtitles to Bengali...")
+                        translated_subs = self.translate_subtitles(subtitles)
+                        
+                        self.log_message("Writing translated subtitles...")
+                        if self.write_srt(translated_subs, bengali_srt_path):
+                            has_subtitles = True
+                            self.log_message("✓ Subtitles translated successfully")
+                else:
+                    self.log_message("No subtitles to process (video has no embedded subtitles)")
+                
+                # Step 7: Combine video with new audio
+                self.log_message("\nStep 7: Combining video with Bengali audio...")
                 bengali_audio_clip = AudioFileClip(bengali_audio_path)
                 
-                if self.audio_mode.get() == "mix":
-                    # Mix with original audio (50% each)
-                    original_audio = video.audio.volumex(0.3)
-                    bengali_audio_clip = bengali_audio_clip.volumex(0.7)
-                    mixed_audio = CompositeAudioClip([original_audio, bengali_audio_clip])
-                    final_video = video.set_audio(mixed_audio)
-                else:
-                    # Replace original audio
-                    final_video = video.set_audio(bengali_audio_clip)
+                # Always replace audio as per user request
+                final_video = video.set_audio(bengali_audio_clip)
                 
-                # Step 7: Write output video
-                self.log_message("\nStep 7: Writing output video file...")
+                # Step 8: Write output video (temporary without subtitles)
+                self.log_message("\nStep 8: Writing video with Bengali audio...")
                 self.log_message("This may take a while depending on video length...")
                 
+                temp_output = os.path.join(temp_dir, "temp_output.mp4")
                 final_video.write_videofile(
-                    self.output_video_path,
+                    temp_output,
                     codec='libx264',
                     audio_codec='aac',
                     logger=None
                 )
                 
+                # Step 9: Embed subtitles if available
+                if has_subtitles:
+                    self.log_message("\nStep 9: Embedding Bengali subtitles...")
+                    subtitle_embedded = self.embed_subtitles(
+                        temp_output,
+                        bengali_srt_path,
+                        self.output_video_path
+                    )
+                    
+                    if not subtitle_embedded:
+                        import shutil
+                        shutil.copy2(temp_output, self.output_video_path)
+                        output_srt = os.path.splitext(self.output_video_path)[0] + '_bengali.srt'
+                        shutil.copy2(bengali_srt_path, output_srt)
+                        self.log_message(f"Subtitles saved separately as: {output_srt}")
+                else:
+                    import shutil
+                    shutil.copy2(temp_output, self.output_video_path)
+                    self.log_message("No subtitles to embed")
+                
                 # Cleanup
                 video.close()
                 bengali_audio_clip.close()
-                if self.audio_mode.get() == "mix":
-                    mixed_audio.close()
                 
             self.log_message("\n" + "=" * 60)
             self.log_message("✓ Translation completed successfully!")
+            self.log_message(f"✓ Audio replaced with Bengali dubbing")
+            if has_subtitles:
+                self.log_message(f"✓ Subtitles translated to Bengali")
             self.log_message(f"Output saved to: {self.output_video_path}")
             self.log_message("=" * 60)
             
-            self.root.after(0, lambda: messagebox.showinfo(
-                "Success",
-                f"Video translation completed!\n\nSaved to:\n{self.output_video_path}"
-            ))
+            success_msg = "Video translation completed!\n\n"
+            success_msg += "✓ Audio replaced with Bengali dubbing\n"
+            if has_subtitles:
+                success_msg += "✓ Subtitles translated to Bengali\n"
+            success_msg += f"\nSaved to:\n{self.output_video_path}"
+            
+            self.root.after(0, lambda: messagebox.showinfo("Success", success_msg))
             
         except Exception as e:
             error_msg = f"Error during translation: {str(e)}"

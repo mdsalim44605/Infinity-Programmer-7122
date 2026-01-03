@@ -1,11 +1,12 @@
 # Video Translator - English to Bengali
 
-A free desktop application built with Python that translates video audio from English to Bengali. This tool extracts audio from videos, transcribes English speech, translates it to Bengali, generates Bengali audio, and produces a new video with the translated audio.
+A free desktop application built with Python that translates video audio and subtitles from English to Bengali. This tool extracts audio from videos, transcribes English speech, translates it to Bengali, generates Bengali audio, replaces the original audio with perfect Bengali dubbing, and translates any embedded subtitles to Bengali.
 
 ## 📚 Documentation
 
 - **[Getting Started](GETTING_STARTED.md)** - New users start here!
 - **[Quick Start Guide](QUICKSTART.md)** - 5-minute setup
+- **[Subtitle Translation](SUBTITLE_TRANSLATION.md)** - Complete guide to subtitle translation
 - **[FAQ](FAQ.md)** - Frequently asked questions
 - **[Architecture](ARCHITECTURE.md)** - Technical documentation
 - **[Workflow](WORKFLOW.md)** - How the translation process works
@@ -17,12 +18,12 @@ A free desktop application built with Python that translates video audio from En
 - 🎥 **Video Processing**: Supports multiple video formats (MP4, AVI, MOV, MKV, FLV, WMV)
 - 🗣️ **Speech Recognition**: Automatic English speech-to-text transcription
 - 🌐 **Translation**: English to Bengali text translation
-- 🔊 **Text-to-Speech**: Bengali audio generation
-- 🎚️ **Audio Modes**: 
-  - Replace original audio completely
-  - Mix Bengali audio with original audio
-- 🖥️ **User-Friendly GUI**: Easy-to-use desktop interface
-- 📝 **Progress Logging**: Real-time progress updates and logs
+- 🔊 **Text-to-Speech**: Perfect Bengali audio dubbing generation
+- 🎬 **Audio Replacement**: Completely replaces original audio with Bengali dubbing
+- 📝 **Subtitle Translation**: Automatically extracts, translates, and embeds Bengali subtitles
+- 🎯 **Smart Subtitle Handling**: Detects embedded subtitles and translates them to Bengali
+- 🖥️ **User-Friendly GUI**: Easy-to-use desktop interface with local file upload
+- 📊 **Progress Logging**: Real-time progress updates and logs
 
 ## Prerequisites
 
@@ -86,25 +87,26 @@ python video_translator.py
    - Select where to save the translated video
    - (Optional: Output location is auto-suggested based on input file)
 
-4. **Select Audio Mode**:
-   - **Replace Original Audio**: Completely replaces English audio with Bengali
-   - **Mix with Original**: Combines both audios (original at 30%, Bengali at 70%)
-
-5. **Start Translation**:
+4. **Start Translation**:
    - Click "Translate Video" button
    - Monitor progress in the log window
    - Wait for completion (time depends on video length)
+   - Audio will be automatically replaced with Bengali dubbing
+   - Subtitles will be automatically translated to Bengali (if present)
 
-6. **Done!**: Your translated video will be saved to the output location
+5. **Done!**: Your translated video will be saved with Bengali audio and subtitles
 
 ## How It Works
 
 1. **Extract Audio**: Extracts audio track from the input video
 2. **Transcribe**: Converts English speech to text using Google Speech Recognition
-3. **Translate**: Translates English text to Bengali using Google Translate
-4. **Generate Audio**: Creates Bengali audio from translated text using gTTS
-5. **Combine**: Merges the video with the new Bengali audio track
-6. **Export**: Saves the final translated video
+3. **Translate Audio**: Translates English text to Bengali using Google Translate
+4. **Generate Bengali Dubbing**: Creates perfect Bengali audio from translated text using gTTS
+5. **Replace Audio**: Completely replaces original audio with Bengali dubbing
+6. **Extract Subtitles**: Extracts embedded subtitles from video (if available)
+7. **Translate Subtitles**: Translates all subtitle text to Bengali
+8. **Embed Subtitles**: Embeds translated Bengali subtitles back into the video
+9. **Export**: Saves the final video with Bengali audio and subtitles
 
 ## Technical Details
 
